@@ -1,3 +1,3 @@
-# Canvas
+# Canvas(WIP)
 
-A description of this package.
+![Demo repo for both iOS and macOS](https://github.com/scchn/CanvasDemo)
