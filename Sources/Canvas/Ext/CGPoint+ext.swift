@@ -17,4 +17,13 @@ extension CGPoint {
         self = extending(length: length, angle: angle)
     }
     
+    public func rotating(origin: CGPoint, angle: CGFloat) -> CGPoint {
+        let transform = CGAffineTransform.identity.translatedBy(x: origin.x, y: origin.y).rotated(by: angle)
+        return CGPoint(x: x - origin.x, y: y - origin.y).applying(transform)
+    }
+    
+    public mutating func rotate(origin: CGPoint, angle: CGFloat) {
+        self = rotating(origin: origin, angle: angle)
+    }
+    
 }

@@ -37,8 +37,10 @@ extension CanvasView {
         case idle
         case selecting
         case drawing(CanvasItem)
+        
         case onItem(CanvasItem, CGPoint)
         case dragging([CanvasItem], CGPoint, CGPoint)
+        
         case onPoint(CanvasItem, IndexPath, CGPoint)
         case editing(CanvasItem, IndexPath, CGPoint)
     }
@@ -55,7 +57,7 @@ public class CanvasView: CanvasBaseView {
     
     private var rectLayerController: LayerController!
     
-    private var selectionToolDrawer = RectSelectionItem()
+    private var selectionTool = SelectionTool()
     
     public private(set) var items: [CanvasItem] = []
     
@@ -74,21 +76,42 @@ public class CanvasView: CanvasBaseView {
     
     private var zoomSize: CGSize = .zero
     
-    public var zoom = false
+    public var shouldResizeItems = true
     
     public var rectBorderColor: Color {
-        get { selectionToolDrawer.strokeColor }
-        set { selectionToolDrawer.strokeColor = newValue }
+        get { selectionTool.strokeColor }
+        set {
+            let oldValue = rectBorderColor
+            selectionTool.strokeColor = newValue
+            undoManager?.registerUndo(withTarget: self) { $0.rectBorderColor = oldValue }
+        }
     }
     
     public var rectBackgroundColor: Color {
-        get { selectionToolDrawer.fillColor }
-        set { selectionToolDrawer.fillColor = newValue }
+        get { selectionTool.fillColor }
+        set {
+            let oldValue = rectBackgroundColor
+            selectionTool.fillColor = newValue
+            undoManager?.registerUndo(withTarget: self) { $0.rectBackgroundColor = oldValue }
+        }
+    }
+    
+    public var strokeColor: Color = .black {
+        didSet {
+            undoManager?.registerUndo(withTarget: self) { $0.strokeColor = oldValue }
+        }
+    }
+    
+    public var fillColor: Color = .clear {
+        didSet {
+            undoManager?.registerUndo(withTarget: self) { $0.fillColor = oldValue }
+        }
     }
     
     public var selectionRange: CGFloat = 7 {
         didSet {
             items.forEach { $0.selectionRadius = selectionRange }
+            undoManager?.registerUndo(withTarget: self) { $0.selectionRange = oldValue }
         }
     }
     
@@ -104,16 +127,12 @@ public class CanvasView: CanvasBaseView {
         baseLayer.addSublayer(itemLayerController.layer)
         
         // init rect layer controller
-        selectionToolDrawer.layer.contentsScale = MainScreenScale
-        selectionToolDrawer.layer.frame = baseLayer.bounds
-        selectionToolDrawer.push(.zero)
-        selectionToolDrawer.push(.zero)
-        selectionToolDrawer.markAsFinished()
-        baseLayer.addSublayer(selectionToolDrawer.layer)
-        
-        #if DEBUG
-        layer?.backgroundColor = Color.cyan.cgColor
-        #endif
+        selectionTool.layer.contentsScale = MainScreenScale
+        selectionTool.layer.frame = baseLayer.bounds
+        selectionTool.push(.zero)
+        selectionTool.push(.zero)
+        selectionTool.markAsFinished()
+        baseLayer.addSublayer(selectionTool.layer)
     }
     
     private func scaleItem(_ item: CanvasItem, _ scaleX: CGFloat, _ scaleY: CGFloat) {
@@ -150,7 +169,7 @@ public class CanvasView: CanvasBaseView {
         }
         
         let newSize = layer.frame.size
-        if zoom {
+        if shouldResizeItems {
             let mx = newSize.width/zoomSize.width, my = newSize.height/zoomSize.height
             items.forEach { scaleItem($0, mx, my) }
         }
@@ -280,6 +299,8 @@ public class CanvasView: CanvasBaseView {
         let item = type.init()
         itemLayerController.addSublayer(item.layer)
         item.selectionRadius = selectionRange
+        item.strokeColor = strokeColor
+        item.fillColor = fillColor
         state = .drawing(item)
     }
     
@@ -302,17 +323,17 @@ public class CanvasView: CanvasBaseView {
     
     // MARK: - Touch Events
     
-    private var revesedItemIndices: StrideThrough<Int> { stride(from: items.count - 1, through: 0, by: -1) }
+    private var reversedItemIndices: StrideThrough<Int> { stride(from: items.count - 1, through: 0, by: -1) }
     
-    private func item(at loc: CGPoint) -> CanvasItem? {
-        if let i = revesedItemIndices.first(where: { items[$0].canSelect(by: loc) }) {
+    private func itemOnPoint(_ loc: CGPoint) -> CanvasItem? {
+        if let i = reversedItemIndices.first(where: { items[$0].canSelect(by: loc) }) {
             return items[i]
         }
         return nil
     }
     
     private func itemsToDrag(at loc: CGPoint) -> [CanvasItem]? {
-        for i in revesedItemIndices {
+        for i in reversedItemIndices {
             let item = items[i]
             if item.canSelect(by: loc) {
                 return !item.isSelected ? [item] : items.filter { $0.isSelected }
@@ -322,7 +343,7 @@ public class CanvasView: CanvasBaseView {
     }
     
     private func itemToEdit(at loc: CGPoint) -> (CanvasItem, IndexPath)? {
-        for i in revesedItemIndices {
+        for i in reversedItemIndices {
             let item = items[i]
             if item.isSelected && !item.pushContinously {
                 if let indexPath = item.indexOfPoint(at: loc) {
@@ -339,20 +360,22 @@ public class CanvasView: CanvasBaseView {
             if let (item, indexPath) = itemToEdit(at: location) {
                 selectItems([item])
                 state = .onPoint(item, indexPath, location)
-            } else if let item = item(at: location) {
+            } else if let item = itemOnPoint(location) {
                 state = .onItem(item, location)
             } else {
                 selectItems([])
-                selectionToolDrawer.update(location, at: IndexPath(item: 0, section: 0))
-                selectionToolDrawer.update(location, at: selectionToolDrawer.endIndexPath!)
+                selectionTool.update(location, at: IndexPath(item: 0, section: 0))
+                selectionTool.update(location, at: selectionTool.endIndexPath!)
                 state = .selecting
             }
         case .drawing(let item):
             if item.pushContinously {
                 item.pushToNextSegment(location)
             } else {
-                if !item.isCompleted {
+                if item.grid.last == nil {
                     item.push(location)
+                } else if let item = item as? FixedElement, item.grid.last?.count == item.elements {
+                    item.pushToNextSegment(location)
                 }
                 item.push(location)
             }
@@ -364,8 +387,8 @@ public class CanvasView: CanvasBaseView {
     override func touchDragged(_ location: CGPoint) {
         switch state {
         case .selecting:
-            selectionToolDrawer.update(location, at: selectionToolDrawer.endIndexPath!)
-            selectItems(selectionToolDrawer.selectedItems(items))
+            selectionTool.update(location, at: selectionTool.endIndexPath!)
+            selectItems(selectionTool.selectedItems(items))
         case .drawing(let item):
             if item.pushContinously {
                 item.push(location)
@@ -375,7 +398,7 @@ public class CanvasView: CanvasBaseView {
         case .onItem(_, let startPoint):
             if let items = itemsToDrag(at: location) {
                 selectItems(items)
-                state = .dragging(items, location, startPoint)
+                state = .dragging(items, startPoint, startPoint)
                 touchDragged(location)
             }
         case .dragging(let items, let oldLoc, let startPoint):
@@ -395,8 +418,8 @@ public class CanvasView: CanvasBaseView {
     override func touchReleased(_ location: CGPoint) {
         switch state {
         case .selecting:
-            selectionToolDrawer.update(.zero, at: IndexPath(item: 0, section: 0))
-            selectionToolDrawer.update(.zero, at: selectionToolDrawer.endIndexPath!)
+            selectionTool.update(.zero, at: IndexPath(item: 0, section: 0))
+            selectionTool.update(.zero, at: selectionTool.endIndexPath!)
             state = .idle
         case .drawing(let item):
             if item.isCompleted && item.finishWhenCompleted {

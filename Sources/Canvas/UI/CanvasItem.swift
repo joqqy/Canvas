@@ -103,7 +103,18 @@ open class CanvasItem: Hashable {
     
     required public init() {
         layerController.draw = { [weak self] layer, ctx in
-            self?.draw(in: ctx)
+            guard let self = self else { return }
+            if !self.isFinished {
+                self.linePathWrappers().drawPaths(in: ctx)
+            }
+            
+            self._mainPathWrappers.drawPaths(in: ctx)
+            
+            CGContext.push(ctx) { self.draw(in: $0) }
+            
+            if self.isCompleted {
+                self._selectedPathWrappers.drawPaths(in: ctx)
+            }
         }
     }
     
@@ -171,7 +182,7 @@ open class CanvasItem: Hashable {
     
     private func redraw() {
         if !batchUpdating {
-            _mainPathWrappers = isCompleted ? mainPathWrappers() : []
+            _mainPathWrappers = mainPathWrappers()
             _selectedPathWrappers = isSelected && isFinished ? selectedPathWrappers() : []
             
             layer.setNeedsDisplay()
@@ -187,13 +198,17 @@ open class CanvasItem: Hashable {
         return [PathWrapper(method: .dash(lineWidth, 1, [4, 4]), color: strokeColor, path: path)]
     }
     
-    /// This method will only be called after `isCompleted` turns `true`.
+    /// The returned `PathWrapper` array is used to draw the internal layer and interact with `CanvasView`'s touch events.
+    /// If you don't need to interact with touch events, use `draw(in:)`
     open func mainPathWrappers() -> [PathWrapper] {
-        let path = grid.reduce(CGMutablePath()) {
+        [PathWrapper(method: .stroke(lineWidth), color: strokeColor, path: grid.reduce(CGMutablePath()) {
             $0.addLines(between: $1)
             return $0
-        }
-        return [PathWrapper(method: .stroke(lineWidth), color: strokeColor, path: path)]
+        })]
+    }
+    
+    open func draw(in ctx: CGContext) {
+        
     }
     
     /// Draw each points in `grid`.
@@ -202,7 +217,7 @@ open class CanvasItem: Hashable {
         if pushContinously {
             let path = mainPathWrappers().reduce(CGMutablePath()) { $0.addPath($1.path); return $0 }
             let box = path.boundingBoxOfPath.insetBy(dx: -selectionRadius, dy: -selectionRadius)
-            pathWrappers.append(PathWrapper(method: .stroke(lineWidth),
+            pathWrappers.append(PathWrapper(method: .dash(lineWidth, 4, [4, 4]),
                                             color: strokeColor,
                                             path: CGPath(rect: box, transform: nil)))
         } else {
@@ -217,21 +232,9 @@ open class CanvasItem: Hashable {
         return pathWrappers
     }
     
-    private func draw(in ctx: CGContext) {
-        if isCompleted {
-            if !isFinished {
-                linePathWrappers().drawPaths(in: ctx)
-            }
-            _mainPathWrappers.drawPaths(in: ctx)
-            _selectedPathWrappers.drawPaths(in: ctx)
-        } else {
-            linePathWrappers().drawPaths(in: ctx)
-        }
-    }
-    
     // MARK: - Selection
     
-    func indexOfPoint(at loc: CGPoint) -> IndexPath? {
+    open func indexOfPoint(at loc: CGPoint) -> IndexPath? {
         for (m, points) in stack.grid.enumerated() {
             for (n, point) in points.enumerated() where Line(from: point, to: loc).distance <= selectionRadius {
                 return IndexPath(item: n, section: m)
@@ -250,12 +253,7 @@ open class CanvasItem: Hashable {
     }
     
     open func canSelect(by rect: CGRect) -> Bool {
-        for points in grid {
-            for point in points where rect.contains(point) {
-                return true
-            }
-        }
-        return false
+        grid.contains { $0 .contains(where: rect.contains) }
     }
     
 }

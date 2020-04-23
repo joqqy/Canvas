@@ -16,6 +16,7 @@ public class LineItem: FixedCanvasItem, Distances {
     }
     
     public override func mainPathWrappers() -> [PathWrapper] {
+        guard isCompleted else { return [] }
         lines = [Line(from: grid[0][0], to: grid[0][1])]
         return super.mainPathWrappers()
     }

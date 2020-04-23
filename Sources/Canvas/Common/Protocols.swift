@@ -16,8 +16,7 @@ public protocol Distances {
 }
 
 public protocol Rectangular {
-    var width: CGFloat { get }
-    var height: CGFloat { get }
+    var size: CGSize { get }
 }
 
 public protocol Circular {

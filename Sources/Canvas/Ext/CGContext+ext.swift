@@ -14,14 +14,21 @@ import UIKit
 extension CGContext {
     
     public static func push(_ ctx: CGContext, using block: (CGContext) -> Void) {
-        #if os(OSX)
         let oldCtx = NSGraphicsContext.current
+        
+        #if os(OSX)
         NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
-        block(ctx)
-        NSGraphicsContext.current = oldCtx
         #else
         UIGraphicsPushContext(ctx)
+        #endif
+        
+        ctx.saveGState()
         block(ctx)
+        ctx.restoreGState()
+        
+        #if os(OSX)
+        NSGraphicsContext.current = oldCtx
+        #else
         UIGraphicsPopContext()
         #endif
     }

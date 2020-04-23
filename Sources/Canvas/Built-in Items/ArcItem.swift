@@ -32,6 +32,7 @@ public class ArcItem: FixedCanvasItem, Angular {
     }
     
     public override func mainPathWrappers() -> [PathWrapper] {
+        guard isCompleted else { return [] }
         updateArc()
         guard let arc = arc else { return [] }
         let mainPath = CGMutablePath()
