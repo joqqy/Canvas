@@ -64,23 +64,40 @@ open class CanvasItem: Hashable {
     // MARK: - Read/Write
     
     open var strokeColor: Color = .black {
-        didSet { if strokeColor != oldValue { redraw() } }
+        didSet {
+            redraw()
+            undoManager?.registerUndo(withTarget: self) { $0.strokeColor = oldValue }
+        }
     }
     
     open var fillColor: Color = .black {
-        didSet { if fillColor != oldValue { redraw() } }
+        didSet {
+            redraw()
+            undoManager?.registerUndo(withTarget: self) { $0.fillColor = oldValue }
+        }
     }
     
     open var lineWidth: CGFloat = 1 {
-        didSet { if lineWidth != oldValue { redraw() } }
+        didSet {
+            redraw()
+            undoManager?.registerUndo(withTarget: self) { $0.lineWidth = oldValue }
+        }
     }
     
     open var isHidden: Bool {
         get { layer.isHidden }
-        set { layer.isHidden = newValue }
+        set {
+            let o = layer.isHidden
+            layer.isHidden = newValue
+            undoManager?.registerUndo(withTarget: self) { $0.isHidden = o }
+        }
     }
     
-    open var selectionRadius: CGFloat = 7
+    open var selectionRadius: CGFloat = 7 {
+        didSet {
+            undoManager?.registerUndo(withTarget: self) { $0.selectionRadius = oldValue }
+        }
+    }
     
     // MARK: - Life Cycle
     
@@ -123,29 +140,22 @@ open class CanvasItem: Hashable {
     }
     
     open func update(_ point: CGPoint, at indexPath: IndexPath) {
-        if isFinished {
-            let old = grid[indexPath.section][indexPath.item]
-            undoManager?.registerUndo(withTarget: self, handler: { item in
-                item.update(old, at: indexPath)
-            })
-        }
         stack.update(point, at: indexPath)
+        redraw()
+    }
+    
+    open func apply(_ t: CGAffineTransform, at indexPath: IndexPath) {
+        let point = stack.grid[indexPath.section][indexPath.item]
+        stack.update(point.applying(t), at: indexPath)
         redraw()
     }
     
     /// Applys the given transformation to all points.
     open func apply(_ t: CGAffineTransform) {
-        if isFinished {
-            let old = transform
-            undoManager?.registerUndo(withTarget: self, handler: { item in
-                item.apply(old)
-            })
-        }
-        transform.concatenating(t)
         beginBatchUpdate()
         for (m, points) in grid.enumerated() {
             for (n, point) in points.enumerated() {
-                update(point.applying(t), at: IndexPath(item: n, section: m))
+                stack.update(point.applying(t), at: IndexPath(item: n, section: m))
             }
         }
         commitBatchUpdate()

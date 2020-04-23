@@ -44,6 +44,10 @@ class LayerController: NSObject, CALayerDelegate {
         layer.addSublayer(sublayer)
     }
     
+    func contains(_ layer: CALayer) -> Bool {
+        layer.sublayers?.contains(layer) ?? false
+    }
+    
     // MARK: - CALayerDelegate
     
     func draw(_ layer: CALayer, in ctx: CGContext) {
